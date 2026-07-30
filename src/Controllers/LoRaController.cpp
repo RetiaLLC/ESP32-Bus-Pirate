@@ -48,11 +48,8 @@ void LoRaController::handleCommand(const TerminalCommand& cmd) {
         if (configured) meshtasticShell.run();
     }
     else helpShell.run(ModeEnum::LORA, false);
-
-#ifdef DEVICE_RETIA_BADGE
-    // The badge radio bit-bangs the shared SPI bus; hand it back to the display.
-    deviceView.reacquireBus();
-#endif
+    // Note: the display bus is re-established in Ili9341SpiDeviceView::show(),
+    // which the dispatcher calls before any pinout redraw.
 }
 
 /*
@@ -99,10 +96,6 @@ void LoRaController::ensureConfigured() {
     }
 
     terminalView.println("✅ LoRa SX1262 ready.\n");
-
-#ifdef DEVICE_RETIA_BADGE
-    deviceView.reacquireBus();   // radio init bit-banged the shared bus; restore the display
-#endif
 }
 
 /*
