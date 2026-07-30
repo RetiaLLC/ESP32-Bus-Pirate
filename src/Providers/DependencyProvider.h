@@ -46,7 +46,14 @@ and injecting shared instances of core components
 #include "Services/UsbS3Service.h"
 #include "Services/CellService.h"
 #include "Services/FmService.h"
+#include "Interfaces/ILoRaService.h"
+#ifdef DEVICE_RETIA_BADGE
+#include "Services/LoRaServiceSX127x.h"   // badge radio is SX1276 (RFM95W), not SX126x
+using LoRaServiceImpl = LoRaServiceSX127x;
+#else
 #include "Services/LoRaService.h"
+using LoRaServiceImpl = LoRaService;
+#endif
 #include "Services/MeshtasticService.h"
 #include "Controllers/UartController.h"
 #include "Controllers/I2cController.h"
@@ -165,7 +172,7 @@ public:
     LittleFsService &getLittleFsService();
     CellService &getCellService();
     FmService &getFmService();
-    LoRaService &getLoRaService();
+    ILoRaService &getLoRaService();
     MeshtasticService &getMeshtasticService();
 
     // Controllers
@@ -295,7 +302,7 @@ private:
     CellService cellService;
     UsbS3Service usbService;
     FmService fmService;
-    LoRaService loRaService;
+    LoRaServiceImpl loRaService;
     MeshtasticService meshtasticService;
 
     // Controllers

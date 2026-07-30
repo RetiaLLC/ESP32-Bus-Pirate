@@ -75,4 +75,22 @@ public:
         uint16_t selectedIndex,
         const std::string& description1,
         const std::string& description2) = 0;
+
+    // Render a generic title + list of text lines on the device screen (live data view).
+    // Default no-op so boards without a suitable data screen are unaffected.
+    virtual void renderDataScreen(const std::string& title, const std::vector<std::string>& lines) {
+        (void)title; (void)lines;
+    }
+
+    // Two-column live view: decoded readings (left, large) + raw values (right, small).
+    // Default no-op so boards without a suitable data screen are unaffected.
+    virtual void renderSensorScreen(const std::string& title,
+                                    const std::vector<std::string>& bigLines,
+                                    const std::vector<std::string>& smallLines) {
+        (void)title; (void)bigLines; (void)smallLines;
+    }
+
+    // Re-establish the display's SPI bus after another peripheral (e.g. the LoRa
+    // radio bit-banged on the shared pins) may have taken it over. Default no-op.
+    virtual void reacquireBus() {}
 };

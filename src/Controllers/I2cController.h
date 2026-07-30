@@ -4,6 +4,8 @@
 #include <string>
 #include <algorithm>
 #include "Interfaces/ITerminalView.h"
+#include "Interfaces/IDeviceView.h"
+#include "Interfaces/ILedService.h"
 #include "Interfaces/IInput.h"
 #include "Interfaces/IUtilityService.h"
 #include "Interfaces/II2cService.h"
@@ -20,7 +22,7 @@
 class I2cController {
 public:
     // Constructor
-    I2cController(ITerminalView& terminalView, IInput& terminalInput, IUtilityService& utilityService, II2cService& i2cService, ArgTransformer& argTransformer, UserInputManager& userInputManager, II2cEepromShell& eepromShell, HelpShell& helpShell);
+    I2cController(ITerminalView& terminalView, IInput& terminalInput, IDeviceView& deviceView, ILedService& ledService, IUtilityService& utilityService, II2cService& i2cService, ArgTransformer& argTransformer, UserInputManager& userInputManager, II2cEepromShell& eepromShell, HelpShell& helpShell);
 
     // Entry point for I2C command
     void handleCommand(const TerminalCommand& cmd);
@@ -61,6 +63,8 @@ private:
 
     ITerminalView& terminalView;
     IInput& terminalInput;
+    IDeviceView& deviceView;
+    ILedService& ledService;
     IUtilityService& utilityService;
     II2cService& i2cService;
     ArgTransformer& argTransformer;
@@ -105,6 +109,9 @@ private:
 
     // Monitor all I2C device registers
     void handleMonitor(const TerminalCommand& cmd);
+
+    // Live BME280/BMP280 decoded reading on screen + temperature-reactive LEDs
+    void handleBme(const TerminalCommand& cmd);
 
     // Trace a single I2C device register
     void handleTrace(const TerminalCommand& cmd);

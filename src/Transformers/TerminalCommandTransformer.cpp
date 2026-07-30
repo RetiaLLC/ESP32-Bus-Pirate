@@ -210,8 +210,8 @@ bool TerminalCommandTransformer::isScreenCommand(const TerminalCommand& cmd) con
    return cmd.getRoot() == "config" || cmd.getRoot() == "setprotocol" || cmd.getRoot() == "trace"
        || cmd.getRoot() == "pullup" || cmd.getRoot() == "pulldown" || cmd.getRoot() == "reset"
        || cmd.getRoot() == "swap" || cmd.getRoot() == "logic" || cmd.getRoot() == "analogic" 
-       || cmd.getRoot() == "wizard" || cmd.getRoot() == "waterfall" || cmd.getRoot() == "scan" 
-       || cmd.getRoot() == "record" || cmd.getRoot() == "listen" 
+       || cmd.getRoot() == "wizard" || cmd.getRoot() == "waterfall"
+       || cmd.getRoot() == "record" || cmd.getRoot() == "listen"
        || cmd.getRoot() == "monitor" || cmd.getRoot() == "receive";
 }
 

@@ -1,3 +1,5 @@
+// SX126x implementation — excluded on the badge, which uses LoRaServiceSX127x.
+#ifndef DEVICE_RETIA_BADGE
 #include "Services/LoRaService.h"
 
 #include <algorithm>
@@ -695,3 +697,5 @@ void LoRaService::onCadDone(bool detected) {
     instance_->cadDetected_ = detected;
     instance_->cadComplete_ = true;
 }
+
+#endif // DEVICE_RETIA_BADGE

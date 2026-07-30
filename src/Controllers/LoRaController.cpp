@@ -48,6 +48,11 @@ void LoRaController::handleCommand(const TerminalCommand& cmd) {
         if (configured) meshtasticShell.run();
     }
     else helpShell.run(ModeEnum::LORA, false);
+
+#ifdef DEVICE_RETIA_BADGE
+    // The badge radio bit-bangs the shared SPI bus; hand it back to the display.
+    deviceView.reacquireBus();
+#endif
 }
 
 /*
@@ -56,8 +61,13 @@ Ensure the LoRa radio is configured before use
 void LoRaController::ensureConfigured() {
     if (configured && loRaService.isInitialized()) return;
 
+#ifdef DEVICE_RETIA_BADGE
+    // On-board RFM95W (SX127x): fixed pins on the shared SPI bus, skip the wizard.
+    terminalView.println("\n[LoRa] on-board RFM95W / SX127x: CS 48, RST 38, DIO0 21, SPI 13/12/11");
+#else
     terminalView.println("\n[LoRa pin configuration]");
     configurePins();
+#endif
 
     resetDefaultRadioProfile();
     terminalView.println("\n[LoRa default profile]");
@@ -89,6 +99,10 @@ void LoRaController::ensureConfigured() {
     }
 
     terminalView.println("✅ LoRa SX1262 ready.\n");
+
+#ifdef DEVICE_RETIA_BADGE
+    deviceView.reacquireBus();   // radio init bit-banged the shared bus; restore the display
+#endif
 }
 
 /*
@@ -103,8 +117,12 @@ void LoRaController::ensureReleased() {
 Configure the LoRa pins and radio profile
 */
 void LoRaController::handleConfig() {
+#ifdef DEVICE_RETIA_BADGE
+    terminalView.println("\n[LoRa] on-board RFM95W / SX127x: fixed pins (CS 48, RST 38, DIO0 21, SPI 13/12/11)");
+#else
     terminalView.println("\n[LoRa pin configuration]");
     configurePins();
+#endif
 
     resetDefaultRadioProfile();
     terminalView.println("\n[LoRa default profile]");

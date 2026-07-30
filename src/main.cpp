@@ -17,6 +17,7 @@
 #include <Boards/WaveshareS3Geek/WaveshareS3GeekBoard.h>
 #include <Boards/TEmbed/TEmbedBoard.h>
 #include <Boards/VisionMasterT190/VisionMasterT190Board.h>
+#include <Boards/RetiaBadge/RetiaBadgeBoard.h>
 #include <Boards/Custom/CustomBoard.h>
 #include <Boards/Common/Serial/BoardHostSerial.h>
 #include <Providers/DependencyProvider.h>
@@ -135,6 +136,12 @@ void setup() {
         IHostSerial& hostSerial = board.getHostSerial();
     #elif defined(DEVICE_S3DEVKIT)
         S3DevKitBoard board;
+        board.initialize();
+        IDeviceView& deviceView = board.getDeviceView();
+        IInput& deviceInput = board.getDeviceInput();
+        IHostSerial& hostSerial = board.getHostSerial();
+    #elif defined(DEVICE_RETIA_BADGE)
+        RetiaBadgeBoard board;
         board.initialize();
         IDeviceView& deviceView = board.getDeviceView();
         IInput& deviceInput = board.getDeviceInput();

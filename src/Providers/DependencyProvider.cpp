@@ -100,7 +100,7 @@ DependencyProvider::DependencyProvider(ITerminalView &terminalView, IDeviceView 
 
       // Controllers
       uartController(terminalView, terminalInput, deviceView, deviceInput, utilityService, uartService, sdService, hdUartService, uartSnifferService, argTransformer, userInputManager, uartAtShell, helpShell, uartEmulationShell),
-      i2cController(terminalView, terminalInput, utilityService, i2cService, argTransformer, userInputManager, i2cEepromShell, helpShell),
+      i2cController(terminalView, terminalInput, deviceView, ledService, utilityService, i2cService, argTransformer, userInputManager, i2cEepromShell, helpShell),
       oneWireController(terminalView, terminalInput, utilityService, oneWireService, argTransformer, userInputManager, ibuttonShell, oneWireEepromShell, helpShell),
       infraredController(terminalView, terminalInput, deviceView, utilityService, infraredService, littleFsService, i2cService, argTransformer, infraredTransformer, userInputManager, universalRemoteShell, helpShell),
       utilityController(terminalView, deviceView, terminalInput, utilityService, pinService, i2sService, userInputManager, pinAnalyzer, aliasManager, argTransformer, commandTransformer, sysInfoShell, guideShell, helpShell, profileShell),
@@ -169,7 +169,7 @@ Rf24Service &DependencyProvider::getRf24Service() { return rf24Service; }
 LittleFsService &DependencyProvider::getLittleFsService() { return littleFsService; }
 CellService &DependencyProvider::getCellService() { return cellService; }
 FmService &DependencyProvider::getFmService() { return fmService; }
-LoRaService &DependencyProvider::getLoRaService() { return loRaService; }
+ILoRaService &DependencyProvider::getLoRaService() { return loRaService; }
 MeshtasticService &DependencyProvider::getMeshtasticService() { return meshtasticService; }
 
 // Controllers

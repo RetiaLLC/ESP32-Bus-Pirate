@@ -1,6 +1,7 @@
 #include "I2cController.h"
 #include <cerrno>
 #include <cstdlib>
+#include <cmath>
 #include <iomanip>
 
 /*
@@ -9,6 +10,8 @@ Constructor
 I2cController::I2cController(
     ITerminalView& terminalView,
     IInput& terminalInput,
+    IDeviceView& deviceView,
+    ILedService& ledService,
     IUtilityService& utilityService,
     II2cService& i2cService,
     ArgTransformer& argTransformer,
@@ -18,6 +21,8 @@ I2cController::I2cController(
 )
     : terminalView(terminalView),
       terminalInput(terminalInput),
+      deviceView(deviceView),
+      ledService(ledService),
       utilityService(utilityService),
       i2cService(i2cService),
       argTransformer(argTransformer),
@@ -46,6 +51,7 @@ void I2cController::handleCommand(const TerminalCommand& cmd) {
     else if (cmd.getRoot() == "eeprom") handleEeprom(cmd);
     else if (cmd.getRoot() == "recover") handleRecover();
     else if (cmd.getRoot() == "monitor") handleMonitor(cmd);
+    else if (cmd.getRoot() == "bme") handleBme(cmd);
     else if (cmd.getRoot() == "trace") handleTrace(cmd);
     else if (cmd.getRoot() == "swap") handleSwap();
     else if (cmd.getRoot() == "health") handleHealth(cmd);
@@ -71,6 +77,7 @@ void I2cController::handleScan() {
     terminalView.println("I2C Scan: Scanning I2C bus... Press [ENTER] to stop");
     terminalView.println("");
     bool found = false;
+    std::vector<std::string> screenLines;
 
     for (uint8_t addr = 1; addr < 127; ++addr) {
         char key = terminalInput.readChar();
@@ -78,20 +85,180 @@ void I2cController::handleScan() {
             terminalView.println("I2C Scan: Cancelled by user.");
             return;
         }
-        
+
         i2cService.beginTransmission(addr);
         if (i2cService.endTransmission() == 0) {
             std::stringstream ss;
             ss << "Found device at 0x" << std::hex << std::uppercase << (int)addr;
             terminalView.println(ss.str());
+            std::stringstream sl;
+            sl << "0x" << std::hex << std::uppercase << (int)addr;
+            screenLines.push_back(sl.str());
             found = true;
         }
     }
 
     if (!found) {
         terminalView.println("I2C Scan: No I2C devices found.");
+        screenLines.push_back("no devices");
     }
     terminalView.println("");
+
+    // Mirror the result to the device screen (no-op on boards without a data screen)
+    deviceView.renderDataScreen("I2C SCAN", screenLines);
+}
+
+/*
+BME280 / BMP280 live decoded reading (Bosch compensation) on screen + temp-reactive LEDs
+*/
+void I2cController::handleBme(const TerminalCommand& cmd) {
+    uint8_t addr = 0x76;
+    if (!cmd.getSubcommand().empty()) tryParseAddress(cmd.getSubcommand(), addr);
+
+    auto r8 = [&](uint8_t reg) -> uint8_t { uint8_t v = 0; i2cService.readReg(addr, reg, &v); return v; };
+    auto u16 = [&](uint8_t lo) -> uint16_t { return (uint16_t)(r8(lo) | ((uint16_t)r8(lo + 1) << 8)); };
+    auto s16 = [&](uint8_t lo) -> int16_t { return (int16_t)u16(lo); };
+
+    // Presence + chip id (BME280=0x60, BMP280=0x58, BME680=0x61)
+    uint8_t chipId = 0;
+    if (!i2cService.readReg(addr, 0xD0, &chipId)) {
+        terminalView.println("BME: no device at 0x" + argTransformer.toHex(addr));
+        return;
+    }
+    bool hasHumidity = (chipId == 0x60);
+    if (chipId != 0x60 && chipId != 0x58) {
+        terminalView.println("BME: chip 0x" + argTransformer.toHex(chipId) + " is not a BMP280/BME280.");
+        return;
+    }
+
+    // Temperature + pressure calibration
+    uint16_t T1 = u16(0x88); int16_t T2 = s16(0x8A), T3 = s16(0x8C);
+    uint16_t P1 = u16(0x8E);
+    int16_t P2 = s16(0x90), P3 = s16(0x92), P4 = s16(0x94), P5 = s16(0x96),
+            P6 = s16(0x98), P7 = s16(0x9A), P8 = s16(0x9C), P9 = s16(0x9E);
+    // Humidity calibration (BME280 only)
+    uint8_t H1 = r8(0xA1); int16_t H2 = s16(0xE1); uint8_t H3 = r8(0xE3);
+    uint8_t e5 = r8(0xE5);
+    int16_t H4 = (int16_t)(((int16_t)r8(0xE4) << 4) | (e5 & 0x0F));
+    int16_t H5 = (int16_t)(((int16_t)r8(0xE6) << 4) | (e5 >> 4));
+    int8_t  H6 = (int8_t)r8(0xE7);
+
+    // Wake into normal-mode continuous sampling
+    if (hasHumidity) i2cService.writeReg(addr, 0xF2, 0x01); // ctrl_hum x1
+    i2cService.writeReg(addr, 0xF4, 0x27);                  // ctrl_meas: temp x1, press x1, normal
+
+    // Ambient ear LEDs (badge only)
+#ifdef DEVICE_RETIA_BADGE
+    ledService.configure(LED_DATA_PIN, LED_CLOCK_PIN, 10, "WS2812B", 70);
+#endif
+
+    terminalView.println("BME: live reading on 0x" + argTransformer.toHex(addr) +
+                         (hasHumidity ? " (BME280)" : " (BMP280)") + ". Press [ENTER] to stop.\n");
+
+    while (true) {
+        // Burst-read raw data 0xF7..0xFE
+        uint8_t d[8] = {0};
+        i2cService.beginTransmission(addr);
+        i2cService.write(0xF7);
+        i2cService.endTransmission(false);
+        i2cService.requestFrom(addr, (uint8_t)8);
+        for (int i = 0; i < 8 && i2cService.available(); ++i) d[i] = (uint8_t)i2cService.read();
+
+        int32_t adc_P = ((int32_t)d[0] << 12) | ((int32_t)d[1] << 4) | (d[2] >> 4);
+        int32_t adc_T = ((int32_t)d[3] << 12) | ((int32_t)d[4] << 4) | (d[5] >> 4);
+        int32_t adc_H = ((int32_t)d[6] << 8) | d[7];
+
+        // Temperature (deg C)
+        float v1 = ((float)adc_T / 16384.0f - (float)T1 / 1024.0f) * (float)T2;
+        float v2 = (((float)adc_T / 131072.0f - (float)T1 / 8192.0f) *
+                    ((float)adc_T / 131072.0f - (float)T1 / 8192.0f)) * (float)T3;
+        float tFine = v1 + v2;
+        float tempC = tFine / 5120.0f;
+
+        // Pressure (hPa)
+        float pres = 0.0f;
+        float pv1 = tFine / 2.0f - 64000.0f;
+        float pv2 = pv1 * pv1 * (float)P6 / 32768.0f;
+        pv2 = pv2 + pv1 * (float)P5 * 2.0f;
+        pv2 = pv2 / 4.0f + (float)P4 * 65536.0f;
+        pv1 = ((float)P3 * pv1 * pv1 / 524288.0f + (float)P2 * pv1) / 524288.0f;
+        pv1 = (1.0f + pv1 / 32768.0f) * (float)P1;
+        if (pv1 != 0.0f) {
+            float p = 1048576.0f - (float)adc_P;
+            p = (p - pv2 / 4096.0f) * 6250.0f / pv1;
+            pv1 = (float)P9 * p * p / 2147483648.0f;
+            pv2 = p * (float)P8 / 32768.0f;
+            p = p + (pv1 + pv2 + (float)P7) / 16.0f;
+            pres = p / 100.0f;
+        }
+
+        // Humidity (%RH)
+        float hum = 0.0f;
+        if (hasHumidity) {
+            float h = tFine - 76800.0f;
+            h = ((float)adc_H - ((float)H4 * 64.0f + (float)H5 / 16384.0f * h)) *
+                ((float)H2 / 65536.0f * (1.0f + (float)H6 / 67108864.0f * h *
+                 (1.0f + (float)H3 / 67108864.0f * h)));
+            h = h * (1.0f - (float)H1 * h / 524288.0f);
+            if (h > 100.0f) h = 100.0f;
+            if (h < 0.0f) h = 0.0f;
+            hum = h;
+        }
+
+        // Terminal line
+        char tline[96];
+        if (hasHumidity)
+            snprintf(tline, sizeof(tline), "T=%.1f C   H=%.0f %%   P=%.1f hPa", tempC, hum, pres);
+        else
+            snprintf(tline, sizeof(tline), "T=%.1f C   P=%.1f hPa", tempC, pres);
+        terminalView.println(tline);
+
+        // Screen: decoded (left) + raw (right)
+        char bT[24], bH[24], bP[24];
+        snprintf(bT, sizeof(bT), "%.1f C", tempC);
+        snprintf(bH, sizeof(bH), "%.0f %%RH", hum);
+        snprintf(bP, sizeof(bP), "%.0f hPa", pres);
+        std::vector<std::string> big = { std::string("T ") + bT };
+        if (hasHumidity) big.push_back(std::string("H ") + bH);
+        big.push_back(std::string("P ") + bP);
+
+        char rT[24], rP[24], rH[24];
+        snprintf(rT, sizeof(rT), "aT %06lX", (unsigned long)adc_T);
+        snprintf(rP, sizeof(rP), "aP %06lX", (unsigned long)adc_P);
+        snprintf(rH, sizeof(rH), "aH %04lX", (unsigned long)adc_H);
+        std::vector<std::string> small = {
+            std::string("0x") + argTransformer.toHex(addr),
+            std::string("id 0x") + argTransformer.toHex(chipId),
+            "raw:", rT, rP
+        };
+        if (hasHumidity) small.push_back(rH);
+        deviceView.renderSensorScreen("BME280", big, small);
+
+        // Ear LEDs: cold(blue) -> warm(red), 16..30 C
+#ifdef DEVICE_RETIA_BADGE
+        float tc = tempC; if (tc < 16.0f) tc = 16.0f; if (tc > 30.0f) tc = 30.0f;
+        float frac = (tc - 16.0f) / 14.0f;
+        uint8_t red = (uint8_t)(frac * 255.0f);
+        uint8_t blue = (uint8_t)((1.0f - frac) * 255.0f);
+        uint8_t green = (uint8_t)((1.0f - fabsf(frac - 0.5f) * 2.0f) * 90.0f);
+        ledService.fill(CRGB(red, green, blue));
+#endif
+
+        // ~600ms window, stop on ENTER
+        uint32_t elapsed = 0;
+        while (elapsed < 600) {
+            char key = terminalInput.readChar();
+            if (key == '\r' || key == '\n') {
+                terminalView.println("\nBME: stopped.");
+#ifdef DEVICE_RETIA_BADGE
+                ledService.fill(CRGB(0, 0, 0));
+#endif
+                return;
+            }
+            utilityService.sleepMs(20);
+            elapsed += 20;
+        }
+    }
 }
 
 /*
@@ -796,6 +963,7 @@ void I2cController::handleMonitor(const TerminalCommand& cmd) {
         }
 
         // Compare and show changes
+        std::vector<std::string> screenLines;
         for (uint16_t i = 0; i < len; ++i) {
             if (valid[i] && curr[i] != prev[i]) {
                 std::stringstream ss;
@@ -803,8 +971,16 @@ void I2cController::handleMonitor(const TerminalCommand& cmd) {
                    << ": 0x" << std::setw(2) << (int)prev[i]
                    << " -> 0x" << std::setw(2) << (int)curr[i];
                 terminalView.println(ss.str());
+                std::stringstream sl;
+                sl << "reg 0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (int)i
+                   << " = 0x" << std::setw(2) << (int)curr[i];
+                screenLines.push_back(sl.str());
                 prev[i] = curr[i];
             }
+        }
+        // Mirror live changes to the device screen (no-op on screenless boards)
+        if (!screenLines.empty()) {
+            deviceView.renderDataScreen("I2C MON 0x" + argTransformer.toHex(addr), screenLines);
         }
 
         // Check for user input to stop
