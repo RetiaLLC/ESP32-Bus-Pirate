@@ -149,6 +149,19 @@ void Ili9341SpiDeviceView::drawAnalogicTrace(uint8_t pin, const std::vector<uint
   }
 }
 
+// Heat colormap for the waterfall: 0..100 -> blue -> cyan -> green -> yellow
+// -> red, packed to RGB565. Low energy reads cold, an active carrier burns hot.
+static uint16_t waterfallHeat(int level) {
+  if (level < 0) level = 0;
+  if (level > 100) level = 100;
+  int r, g, b;
+  if (level < 25)      { r = 0;                        g = level * 255 / 25;              b = 255; }
+  else if (level < 50) { r = 0;                        g = 255;                           b = 255 - (level - 25) * 255 / 25; }
+  else if (level < 75) { r = (level - 50) * 255 / 25;  g = 255;                           b = 0; }
+  else                 { r = 255;                      g = 255 - (level - 75) * 255 / 25; b = 0; }
+  return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
 void Ili9341SpiDeviceView::drawWaterfall(
     const std::string& title,
     float startValue,
@@ -162,34 +175,32 @@ void Ili9341SpiDeviceView::drawWaterfall(
   const int H = tft.height();
   const int midX = W / 2;
 
-  const int headerH = 12;
+  const int headerH = 14;
   const int footerH = 12;
   const int graphY  = headerH;
   const int graphH  = H - headerH - footerH;
 
   const int barMaxPixels = midX - 2;
 
-  // Clamp level
   if (level < 0) level = 0;
   if (level > 100) level = 100;
   int barPixels = (level * barMaxPixels) / 100;
 
-  // First row: titles, labels
+  const uint16_t axisCol = (uint16_t)((0x28 >> 3) << 11 | (0x28 >> 2) << 5 | (0x28 >> 3));
+
+  // First row of a sweep: repaint the frame (header band, freq labels, axis).
   if (rowIndex == 0) {
-    // Full clear
     tft.fillScreen(TFT_BLACK);
 
-    // Title
+    tft.fillRect(0, 0, W, headerH, tft.color565(8, 10, 28));
     tft.setTextSize(1);
     tft.setTextFont(1);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setCursor(2, 2);
+    tft.setTextColor(tft.color565(0, 255, 200), tft.color565(8, 10, 28));
+    tft.setCursor(3, 3);
     tft.print(title.c_str());
 
-    // Format labels
     char bufStart[24];
     char bufEnd[24];
-
     if (unit && unit[0]) {
       snprintf(bufStart, sizeof(bufStart), "%.2f%s", startValue, unit);
       snprintf(bufEnd,   sizeof(bufEnd),   "%.2f%s", endValue,   unit);
@@ -198,45 +209,36 @@ void Ili9341SpiDeviceView::drawWaterfall(
       snprintf(bufEnd,   sizeof(bufEnd),   "%.2f", endValue);
     }
 
-    // Start label (top right)
-    int wStart = tft.textWidth(bufStart);
-    tft.setCursor(W - wStart - 2, 2);
+    // Frequency axis runs top (start) -> bottom (end) on the left edge.
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setCursor(2, graphY + 1);
     tft.print(bufStart);
-
-    // End label (bottom right)
-    int wEnd = tft.textWidth(bufEnd);
-    tft.setCursor(W - wEnd - 2, H - footerH + 2);
+    tft.setCursor(2, H - footerH + 2);
     tft.print(bufEnd);
 
-    // Graph area
-    tft.fillRect(0, graphY, W, graphH, TFT_BLACK);
-    tft.drawFastVLine(midX, graphY, graphH, TFT_DARKGREY);
+    tft.drawFastVLine(midX, graphY, graphH, axisCol);
   }
 
   if (rowCount <= 1) return;
   if (rowIndex < 0) rowIndex = 0;
   if (rowIndex > rowCount - 1) rowIndex = rowCount - 1;
 
-  // Map row to Y
-  int y = graphY + (int)((int64_t)rowIndex * (graphH - 1) / (rowCount - 1));
+  // Each frequency bin owns a band [y0,y1), so mirrored bars tile with no gaps.
+  int y0 = graphY + (int)((int64_t)rowIndex * graphH / rowCount);
+  int y1 = graphY + (int)((int64_t)(rowIndex + 1) * graphH / rowCount);
+  int bandH = y1 - y0;
+  if (bandH < 1) bandH = 1;
 
-  // Clear this row only
-  tft.drawFastHLine(0, y, W, TFT_BLACK);
+  tft.fillRect(0, y0, W, bandH, TFT_BLACK);
+  tft.drawFastVLine(midX, y0, bandH, axisCol);
 
-  // Restore center pixel
-  tft.drawPixel(midX, y, TFT_DARKGREY);
-
-  // Draw energy bar
   if (barPixels > 0) {
+    const uint16_t col = waterfallHeat(level);
     int x0 = midX - barPixels;
     int w  = barPixels * 2;
-
     if (x0 < 0) { w += x0; x0 = 0; }
     if (x0 + w > W) w = W - x0;
-
-    if (w > 0) {
-      tft.drawFastHLine(x0, y, w, TFT_GREEN);
-    }
+    if (w > 0) tft.fillRect(x0, y0, w, bandH, col);
   }
 }
 

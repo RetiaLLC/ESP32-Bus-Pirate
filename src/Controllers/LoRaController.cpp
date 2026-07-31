@@ -1028,66 +1028,77 @@ void LoRaController::handleWaterfall() {
     int bestDbm = -171;
     float bestFrequency = 0.0f;
     std::string title = "P:--";
-    size_t index = 0;
+    std::vector<int> levels(frequencies.size(), 1);
+    constexpr int NOISE_MAX_LEVEL = 18;
 
+    // Batch a full sweep before touching the display. The SX127x bit-bangs the
+    // shared SPI bus, and the ILI9341 only reliably reclaims it through a full
+    // reacquireBus() (tft.init) — interleaving a radio read and a TFT draw on
+    // every point deadlocks the bus (hangs the badge). So: measure the whole
+    // sweep with the radio, hand the bus back to the display exactly once, then
+    // paint the row. On other boards reacquireBus() is a no-op.
     while (true) {
         const char c = terminalInput.readChar();
         if (c == '\r' || c == '\n') break;
 
-        if (index == 0) {
-            // Keep the header stable for a complete sweep: it shows the
-            // frequency with the strongest RSSI from the previous pass.
-            if (bestDbm > -171) {
-                title = "P:" +
-                    argTransformer.formatFloat(bestFrequency, 3) +
-                    "MHz";
-            } else {
-                title = "P:--";
+        // ---- measure the whole sweep (radio owns the bus) ----
+        bestDbm = -171;
+        bestFrequency = 0.0f;
+        bool aborted = false;
+        for (size_t i = 0; i < frequencies.size(); ++i) {
+            const char cc = terminalInput.readChar();
+            if (cc == '\r' || cc == '\n') { aborted = true; break; }
+
+            ILoRaService::RssiStats stats;
+            int peak = dbmMin;
+            if (loRaService.measureRssi(
+                    frequencies[i],
+                    static_cast<uint32_t>(dwellMs),
+                    stats)) {
+                peak = stats.maximum;
+                if (peak > bestDbm) {
+                    bestDbm = peak;
+                    bestFrequency = frequencies[i];
+                }
             }
 
-            bestDbm = -171;
-            bestFrequency = 0.0f;
-        }
-
-        ILoRaService::RssiStats stats;
-        int peak = dbmMin;
-        if (loRaService.measureRssi(
-                frequencies[index],
-                static_cast<uint32_t>(dwellMs),
-                stats)) {
-            peak = stats.maximum;
-            if (peak > bestDbm) {
-                bestDbm = peak;
-                bestFrequency = frequencies[index];
+            const int clamped = std::max(
+                dbmMin, std::min(dbmMax, peak));
+            int level = 1;
+            if (clamped < threshold && threshold > dbmMin) {
+                level = 1 + static_cast<int>(
+                    static_cast<int64_t>(clamped - dbmMin) *
+                    (NOISE_MAX_LEVEL - 1) / (threshold - dbmMin));
+            } else if (dbmMax > threshold) {
+                level = NOISE_MAX_LEVEL + static_cast<int>(
+                    static_cast<int64_t>(clamped - threshold) *
+                    (100 - NOISE_MAX_LEVEL) / (dbmMax - threshold));
             }
+            levels[i] = std::max(1, std::min(100, level));
+        }
+        if (aborted) break;
+
+        // Peak-hold header for the pass just measured.
+        if (bestDbm > -171) {
+            title = "P:" +
+                argTransformer.formatFloat(bestFrequency, 3) +
+                "MHz";
+        } else {
+            title = "P:--";
         }
 
-        const int clamped = std::max(
-            dbmMin, std::min(dbmMax, peak));
-        constexpr int NOISE_MAX_LEVEL = 18;
-        int level = 1;
-        if (clamped < threshold && threshold > dbmMin) {
-            level = 1 + static_cast<int>(
-                static_cast<int64_t>(clamped - dbmMin) *
-                (NOISE_MAX_LEVEL - 1) / (threshold - dbmMin));
-        } else if (dbmMax > threshold) {
-            level = NOISE_MAX_LEVEL + static_cast<int>(
-                static_cast<int64_t>(clamped - threshold) *
-                (100 - NOISE_MAX_LEVEL) / (dbmMax - threshold));
+        // ---- hand the bus back to the display, paint the sweep ----
+        deviceView.reacquireBus();
+        for (size_t i = 0; i < frequencies.size(); ++i) {
+            deviceView.drawWaterfall(
+                title,
+                start,
+                end,
+                "MHz",
+                static_cast<int>(i),
+                static_cast<int>(frequencies.size()),
+                levels[i]);
         }
-        level = std::max(1, std::min(100, level));
-
-        deviceView.drawWaterfall(
-            title,
-            start,
-            end,
-            "MHz",
-            static_cast<int>(index),
-            static_cast<int>(frequencies.size()),
-            level);
-
-        index++;
-        if (index >= frequencies.size()) index = 0;
     }
 
     loRaService.setFrequency(originalFrequency);
