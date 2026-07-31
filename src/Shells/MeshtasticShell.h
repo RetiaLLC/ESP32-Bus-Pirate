@@ -6,6 +6,7 @@
 #include "Interfaces/IInput.h"
 #include "Interfaces/ITerminalView.h"
 #include "Interfaces/IUtilityService.h"
+#include "Interfaces/IDeviceView.h"
 #include "Interfaces/IShell.h"
 #include "Managers/UserInputManager.h"
 #include "Models/MeshtasticPacket.h"
@@ -22,7 +23,8 @@ public:
                     UserInputManager& userInputManager,
                     ArgTransformer& argTransformer,
                     ILoRaService& loRaService,
-                    MeshtasticService& meshtasticService);
+                    MeshtasticService& meshtasticService,
+                    IDeviceView& deviceView);
 
     void run() override;
 
@@ -67,6 +69,7 @@ private:
     ArgTransformer& argTransformer;
     ILoRaService& loRaService;
     MeshtasticService& meshtasticService;
+    IDeviceView& deviceView;
 
     std::string presetName_ = "LONG_FAST";
     std::string channelName_ = "LongFast";

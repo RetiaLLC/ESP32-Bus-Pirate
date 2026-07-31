@@ -93,4 +93,12 @@ public:
     // Re-establish the display's SPI bus after another peripheral (e.g. the LoRa
     // radio bit-banged on the shared pins) may have taken it over. Default no-op.
     virtual void reacquireBus() {}
+
+    // Live single-frequency signal meter: a large value + coloured bar (green =
+    // weak/quiet, red = strong), with a held peak marker. Default no-op so
+    // boards without a suitable screen are unaffected.
+    virtual void drawSignalMeter(const std::string& title, int valueDbm,
+                                 int minDbm, int maxDbm, int peakDbm) {
+        (void)title; (void)valueDbm; (void)minDbm; (void)maxDbm; (void)peakDbm;
+    }
 };

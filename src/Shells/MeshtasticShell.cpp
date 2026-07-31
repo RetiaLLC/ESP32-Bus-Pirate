@@ -9,14 +9,16 @@ MeshtasticShell::MeshtasticShell(ITerminalView& terminalView,
                                  UserInputManager& userInputManager,
                                  ArgTransformer& argTransformer,
                                  ILoRaService& loRaService,
-                                 MeshtasticService& meshtasticService)
+                                 MeshtasticService& meshtasticService,
+                                 IDeviceView& deviceView)
     : terminalView(terminalView),
       terminalInput(terminalInput),
       utilityService(utilityService),
       userInputManager(userInputManager),
       argTransformer(argTransformer),
       loRaService(loRaService),
-      meshtasticService(meshtasticService) {}
+      meshtasticService(meshtasticService),
+      deviceView(deviceView) {}
 
 void MeshtasticShell::run() {
     if (!loRaService.isInitialized()) {
@@ -278,6 +280,13 @@ void MeshtasticShell::cmdReceive() {
         return;
     }
 
+    // On-screen decoded monitor (newest on top).
+    std::vector<std::string> screenLines;
+    screenLines.push_back("Listening " +
+        argTransformer.formatFloat(frequency_, 3) + " MHz");
+    deviceView.reacquireBus();
+    deviceView.renderDataScreen("Mesh Monitor", screenLines);
+
     uint32_t received = 0;
     uint32_t parsed = 0;
     uint32_t errors = 0;
@@ -309,11 +318,38 @@ void MeshtasticShell::cmdReceive() {
             terminalView.println(argTransformer.formatHexAscii(
                 frame.data(), frame.size(), true, 8));
             terminalView.println("");
+
+            char rb[40];
+            snprintf(rb, sizeof(rb), "raw %uB %ddBm",
+                     static_cast<unsigned>(frame.size()),
+                     static_cast<int>(loRaService.getRssi()));
+            if (!screenLines.empty() && screenLines.front().rfind("Listening", 0) == 0)
+                screenLines.clear();
+            screenLines.insert(screenLines.begin(), rb);
+            if (screenLines.size() > 10) screenLines.pop_back();
+            deviceView.reacquireBus();
+            deviceView.renderDataScreen("Mesh Monitor", screenLines);
             continue;
         }
 
         parsed++;
         printPacket(packet, frame, received);
+
+        // Decoded line for the TFT: node + text / port / [enc].
+        char nb[16];
+        snprintf(nb, sizeof(nb), "!%04X ",
+                 static_cast<unsigned>(packet.source & 0xFFFF));
+        std::string sl = nb;
+        if (!packet.encrypted && !packet.text.empty()) sl += packet.text;
+        else if (!packet.encrypted) sl += "port " + std::to_string(packet.portNum);
+        else sl += "[enc] ch" + std::to_string(packet.channel);
+        if (sl.size() > 34) sl = sl.substr(0, 34);
+        if (!screenLines.empty() && screenLines.front().rfind("Listening", 0) == 0)
+            screenLines.clear();
+        screenLines.insert(screenLines.begin(), sl);
+        if (screenLines.size() > 10) screenLines.pop_back();
+        deviceView.reacquireBus();
+        deviceView.renderDataScreen("Mesh Monitor", screenLines);
     }
 
     loRaService.stopReceive();

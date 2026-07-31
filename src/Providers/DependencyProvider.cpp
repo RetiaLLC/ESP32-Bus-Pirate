@@ -90,7 +90,7 @@ DependencyProvider::DependencyProvider(ITerminalView &terminalView, IDeviceView 
       usbAdapterShell(terminalView, terminalInput, utilityService, userInputManager, nvsService, systemService),
       mouseShell(terminalView, terminalInput, userInputManager, utilityService),
       meshtasticShell(terminalView, terminalInput, utilityService, userInputManager,
-                      argTransformer, loRaService, meshtasticService),
+                      argTransformer, loRaService, meshtasticService, deviceView),
 
       // Selectors
       horizontalSelector(deviceView, deviceInput, utilityService),

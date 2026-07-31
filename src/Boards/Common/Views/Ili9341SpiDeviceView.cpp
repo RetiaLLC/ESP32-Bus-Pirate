@@ -242,6 +242,61 @@ void Ili9341SpiDeviceView::drawWaterfall(
   }
 }
 
+void Ili9341SpiDeviceView::drawSignalMeter(const std::string& title, int valueDbm,
+                                           int minDbm, int maxDbm, int peakDbm) {
+  const int W = tft.width();
+  if (maxDbm <= minDbm) maxDbm = minDbm + 1;
+
+  // Full frame only when the title changes; then just refresh number + bar.
+  if (title != lastDataTitle) {
+    lastDataTitle = title;
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.setTextFont(2); tft.setTextSize(2);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(title.c_str(), W / 2, 18);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawFastHLine(0, 34, W, TFT_DARKGREY);
+  }
+
+  int v = valueDbm; if (v < minDbm) v = minDbm; if (v > maxDbm) v = maxDbm;
+  const int pct = (v - minDbm) * 100 / (maxDbm - minDbm);
+
+  // Big current value, coloured by strength.
+  tft.fillRect(0, 44, W, 56, TFT_BLACK);
+  char num[24]; snprintf(num, sizeof(num), "%d dBm", valueDbm);
+  tft.setTextColor(waterfallHeat(pct), TFT_BLACK);
+  tft.setTextFont(4); tft.setTextSize(2);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString(num, W / 2, 72);
+  tft.setTextDatum(TL_DATUM);
+
+  // Gradient bar with a held-peak marker.
+  const int barX = 14, barY = 116, barW = W - 28, barH = 46;
+  tft.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, TFT_DARKGREY);
+  tft.fillRect(barX, barY, barW, barH, TFT_BLACK);
+  const int fillW = pct * barW / 100;
+  for (int x = 0; x < fillW; ++x) {
+    tft.drawFastVLine(barX + x, barY, barH, waterfallHeat(x * 100 / barW));
+  }
+  int pk = peakDbm; if (pk < minDbm) pk = minDbm; if (pk > maxDbm) pk = maxDbm;
+  const int pkX = barX + (pk - minDbm) * barW / (maxDbm - minDbm);
+  tft.drawFastVLine(pkX, barY - 4, barH + 8, TFT_WHITE);
+
+  // Scale + peak labels.
+  tft.fillRect(0, barY + barH + 6, W, 20, TFT_BLACK);
+  tft.setTextFont(2); tft.setTextSize(1);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  char lo[12], hi[12], pkl[24];
+  snprintf(lo, sizeof(lo), "%d", minDbm);
+  snprintf(hi, sizeof(hi), "%d", maxDbm);
+  snprintf(pkl, sizeof(pkl), "peak %d", peakDbm);
+  tft.setCursor(barX, barY + barH + 8); tft.print(lo);
+  tft.setTextDatum(TR_DATUM); tft.drawString(hi, barX + barW, barY + barH + 8);
+  tft.setTextDatum(MC_DATUM); tft.drawString(pkl, W / 2, barY + barH + 8);
+  tft.setTextDatum(TL_DATUM);
+}
+
 void Ili9341SpiDeviceView::setRotation(uint8_t rotation) {
   tft.setRotation(rotation);
 }

@@ -135,6 +135,7 @@ public:
   void renderDataScreen(const std::string& title, const std::vector<std::string>& lines) override;
   void renderSensorScreen(const std::string& title, const std::vector<std::string>& bigLines, const std::vector<std::string>& smallLines) override;
   void reacquireBus() override;
+  void drawSignalMeter(const std::string& title, int valueDbm, int minDbm, int maxDbm, int peakDbm) override;
 
   void shutDown();
 

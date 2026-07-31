@@ -409,6 +409,13 @@ void LoRaController::handleReceive() {
         return;
     }
 
+    // On-screen rolling packet list (newest on top).
+    std::vector<std::string> screenLines;
+    screenLines.push_back("Listening " +
+        argTransformer.formatFloat(state.getLoRaFrequency(), 3) + " MHz");
+    deviceView.reacquireBus();
+    deviceView.renderDataScreen("LoRa Sniffer", screenLines);
+
     uint32_t packetNumber = 0;
     uint32_t lastPacketAt = 0;
     uint32_t errors = 0;
@@ -452,6 +459,26 @@ void LoRaController::handleReceive() {
         terminalView.println(argTransformer.formatHexAscii(
             payload.data(), payload.size(), true, 8));
         terminalView.println("");
+
+        // Mirror to the TFT: newest on top, colour-agnostic ASCII preview.
+        std::string ascii;
+        for (size_t k = 0; k < payload.size() && k < 12; ++k) {
+            char ch = static_cast<char>(payload[k]);
+            ascii += (ch >= 32 && ch < 127) ? ch : '.';
+        }
+        char hdr[48];
+        snprintf(hdr, sizeof(hdr), "%lu:%ddBm %uB ",
+                 static_cast<unsigned long>(packetNumber),
+                 static_cast<int>(loRaService.getRssi()),
+                 static_cast<unsigned>(payload.size()));
+        if (!screenLines.empty() && screenLines.front().rfind("Listening", 0) == 0) {
+            screenLines.clear();
+        }
+        screenLines.insert(screenLines.begin(), std::string(hdr) + ascii);
+        if (screenLines.size() > 10) screenLines.pop_back();
+        deviceView.reacquireBus();
+        deviceView.renderDataScreen("LoRa Sniffer", screenLines);
+
         lastPacketAt = now;
     }
 
@@ -693,6 +720,13 @@ void LoRaController::handleRssi(const TerminalCommand& cmd) {
                     stats.average, 1) + " dBm");
             terminalView.println("Max: " +
                 std::to_string(stats.maximum) + " dBm");
+
+            // Live on-screen meter: instantaneous peak, held session peak marker.
+            deviceView.reacquireBus();
+            deviceView.drawSignalMeter(
+                "RSSI " + argTransformer.formatFloat(state.getLoRaFrequency(), 3),
+                static_cast<int>(stats.maximum), -120, -30,
+                static_cast<int>(globalMaximum));
         }
 
         const int remaining = intervalMs - static_cast<int>(sampleDuration);
@@ -877,6 +911,19 @@ void LoRaController::handleScan() {
                 // every pass while still reporting a new activity burst.
                 wasAbove[i] = false;
             }
+        }
+
+        // Paint the peak-hold spectrum to the TFT (heat colormap), one row per
+        // frequency bin — same renderer as the waterfall, batched off the radio.
+        deviceView.reacquireBus();
+        for (size_t i = 0; i < frequencies.size(); ++i) {
+            int lvl = 1;
+            if (best[i] > std::numeric_limits<int16_t>::min()) {
+                lvl = std::max(1, std::min(100,
+                    (static_cast<int>(best[i]) + 120) * 100 / 90));
+            }
+            deviceView.drawWaterfall("BAND SCAN", start, end, "MHz",
+                static_cast<int>(i), static_cast<int>(frequencies.size()), lvl);
         }
 
         if (!stopRequested &&
