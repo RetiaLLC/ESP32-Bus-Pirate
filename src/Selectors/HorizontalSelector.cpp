@@ -50,53 +50,39 @@ int HorizontalSelector::selectHeadless() {
         TerminalTypeEnumMapper::toString(TerminalTypeEnum::SerialPort),
     };
 
-    int selected = 2;  // default: Serial
-    const unsigned long longPressMs = 800;
+    const int n = static_cast<int>(options.size());
+    const char* line1 = "LEFT/RIGHT: change   A: select";
+    const char* line2 = "No input = USB Serial";
 
+    int currentIndex = 2;  // default / pre-selected: USB Serial
     display.topBar("ESP32 BIT PIRATE", false, false);
-    display.horizontalSelection(
-        options,
-        selected,
-        "Terminal auto-select",
-        "Short press: CONNECT  Long press: HOTSPOT"
-    );
+    display.horizontalSelection(options, currentIndex, line1, line2);
 
-    // 3 sec window:
-    // - no input: Serial
-    // - short press: WiFi Connect
-    // - long press: WiFi Hotspot
-    const uint32_t timeout = utilityService.nowMs() + 3000;
-    while (utilityService.nowMs() < timeout) {
+    // Let the reset/boot button settle so a held key doesn't self-select.
+    utilityService.sleepMs(250);
+
+    // Interactive picker: d-pad LEFT/RIGHT changes, A selects. A generous
+    // timeout (reset on every keypress) falls back to USB Serial if untouched.
+    // Whatever the user picks is honoured — selecting WiFi is NOT overridden.
+    const uint32_t timeoutMs = 6000;
+    uint32_t deadline = utilityService.nowMs() + timeoutMs;
+    while (utilityService.nowMs() < deadline) {
         char c = input.readChar();
-        if (c == KEY_OK) {
-            const uint32_t pressStart = utilityService.nowMs();
-            while (input.readChar() == KEY_OK) {
-                if (utilityService.nowMs() - pressStart >= longPressMs) {
-                    selected = 1; // WiFi Hotspot
-                    display.horizontalSelection(
-                        options,
-                        selected,
-                        "Terminal selected",
-                        "Starting hotspot..."
-                    );
-                    utilityService.sleepMs(250);
-                    return selected;
-                }
-                utilityService.sleepMs(10);
-            }
-
-            selected = 0; // WiFi Connect
-            display.horizontalSelection(
-                options,
-                selected,
-                "Terminal selected",
-                "Connecting to WiFi..."
-            );
+        if (c == KEY_ARROW_LEFT) {
+            currentIndex = (currentIndex - 1 + n) % n;
+            display.horizontalSelection(options, currentIndex, line1, line2);
+            deadline = utilityService.nowMs() + timeoutMs;
+        } else if (c == KEY_ARROW_RIGHT) {
+            currentIndex = (currentIndex + 1) % n;
+            display.horizontalSelection(options, currentIndex, line1, line2);
+            deadline = utilityService.nowMs() + timeoutMs;
+        } else if (c == KEY_OK) {
+            display.horizontalSelection(options, currentIndex, "Terminal selected", "Starting...");
             utilityService.sleepMs(250);
-            break;
+            return currentIndex;
         }
         utilityService.sleepMs(10);
     }
 
-    return selected;
+    return 2;  // timeout -> USB Serial
 }
