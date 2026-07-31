@@ -97,6 +97,12 @@ public:
 
     setPanel(&_panel);
   }
+
+  // Re-initialise ONLY the SPI bus (not the panel) after the LoRa radio has
+  // bit-banged the shared SCK/MOSI/MISO pins. Reclaims the bus for LovyanGFX
+  // without a panel SWRESET, whose transient flashes the screen white — so a
+  // continuous waterfall (bus handed back and forth every sweep) stays smooth.
+  void reinitBus() { _bus.init(); }
 };
 
 class Ili9341SpiDeviceView : public IDeviceView {

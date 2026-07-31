@@ -547,9 +547,11 @@ void Ili9341SpiDeviceView::renderSensorScreen(const std::string& title,
 }
 
 void Ili9341SpiDeviceView::reacquireBus() {
-  // The LoRa radio bit-bangs the shared SPI pins; re-init LovyanGFX so it
-  // re-configures the bus/pins from scratch and the panel keeps working.
-  tft.init();
+  // The LoRa radio bit-bangs the shared SPI pins; re-init just the BUS so
+  // LovyanGFX drives the panel again — WITHOUT a full tft.init() (panel
+  // SWRESET), whose transient flashed the screen white on every waterfall
+  // sweep. The panel keeps its state, so no re-init is needed there.
+  tft.reinitBus();
   tft.setRotation(config.rotation);
   tft.setSwapBytes(true);
   lastDataTitle.clear();
