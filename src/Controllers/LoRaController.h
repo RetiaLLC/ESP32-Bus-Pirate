@@ -37,6 +37,7 @@ private:
     void handleSpam(const TerminalCommand& cmd);
     void handleJam(const TerminalCommand& cmd);
     void handleReceive();
+    void handleMeshcore();
     void handleRecord();
     void handleLoad();
     void handleRssi(const TerminalCommand& cmd);

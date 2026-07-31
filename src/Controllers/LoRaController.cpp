@@ -47,6 +47,7 @@ void LoRaController::handleCommand(const TerminalCommand& cmd) {
         ensureConfigured();
         if (configured) meshtasticShell.run();
     }
+    else if (root == "meshcore") handleMeshcore();
     else helpShell.run(ModeEnum::LORA, false);
     // Note: the display bus is re-established in Ili9341SpiDeviceView::show(),
     // which the dispatcher calls before any pinout redraw.
@@ -390,6 +391,36 @@ void LoRaController::handleJam(const TerminalCommand& cmd) {
 /*
 Receive LoRa packets
 */
+/*
+Tune the radio to MeshCore's default US PHY (915 MHz / BW250 / SF10 / CR4:5,
+private sync 0x12) and drop into the on-screen sniffer. MeshCore shares the
+private sync word with the raw profile, so its frames demodulate here; the
+group-channel payloads are AES-128 so they show as raw bytes, not plaintext.
+*/
+void LoRaController::handleMeshcore() {
+    ensureConfigured();
+    if (!configured) return;
+
+    state.setLoRaFrequency(915.0f);
+    state.setLoRaBandwidth(250);
+    state.setLoRaSpreadingFactor(10);
+    state.setLoRaCodingRate(5);
+    state.setLoRaSyncWord(0x1424);
+    LoRaRadioProfile profile = state.getLoRaProfile();
+    if (!loRaService.setFrequency(915.0f) ||
+        !loRaService.setModemProfile(profile)) {
+        terminalView.println("MeshCore preset: failed to apply.\n");
+        return;
+    }
+
+    terminalView.println("\n[MeshCore sniffer preset]");
+    terminalView.println("915.000 MHz  BW 250 kHz  SF 10  CR 4/5  sync 0x12");
+    terminalView.println("MeshCore frames demodulate here; group payloads are");
+    terminalView.println("AES-128 (shown raw). Press [ENTER] to stop.");
+
+    handleReceive();
+}
+
 void LoRaController::handleReceive() {
     ensureConfigured();
     if (!configured) return;
