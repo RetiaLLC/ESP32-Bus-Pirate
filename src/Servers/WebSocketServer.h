@@ -16,6 +16,7 @@ public:
     char readCharBlocking();
     char readCharNonBlocking();
     void sendText(const std::string& msg);
+    void flushOutput();
     std::string sanitizeUtf8(const std::string& input);
 
 private:
@@ -24,5 +25,6 @@ private:
 
     httpd_handle_t server;
     static inline std::deque<char> buffer;
+    static inline std::string outBuffer;   // accumulates a command's output; flushed as one WS frame
     static inline int clientFd = -1;
 };

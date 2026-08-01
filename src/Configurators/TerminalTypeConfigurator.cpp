@@ -16,7 +16,9 @@ TerminalTypeEnum TerminalTypeConfigurator::configure() {
     int selected = 2; // Serial
 
     #if defined(DEVICE_M5STAMPS3) || defined(DEVICE_S3DEVKIT) || defined(DEVICE_CUSTOM) || defined(DEVICE_RETIA_BADGE)
-        // Badge: auto-select USB Serial after a 3s window (short press A = WiFi, long = hotspot)
+        // Badge: d-pad LEFT/RIGHT to change, A to select; no input for ~6s defaults to
+        // USB Serial. USB is the safe default so a reset badge never silently sits on
+        // Wi-Fi — pick WiFi Connect / Hotspot explicitly when you want the web CLI.
         selected = selector.selectHeadless();
     #else
         selected = selector.select(

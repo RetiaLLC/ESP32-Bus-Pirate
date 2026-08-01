@@ -52,7 +52,15 @@ esp_err_t WebSocketServer::wsHandler(httpd_req_t *req) {
         return ret;
     }
     frame.payload[frame.len] = '\0';
-    
+
+    // Bind the reply socket here, from the data frame — NOT only at the GET
+    // handshake. On this board/IDF the handshake's clientFd assignment never
+    // sticks (clientFd stays -1), so every response was dropped at the
+    // `if (clientFd < 0) return;` guard in sendText. A data frame carries the
+    // real socket fd, and it arrives immediately before the command's output is
+    // generated, so refreshing clientFd here guarantees a valid reply target.
+    clientFd = httpd_req_to_sockfd(req);
+
     // Push chars one by one into buffer
     for (size_t i = 0; i < frame.len; ++i) {
         self->buffer.push_back(((char*)frame.payload)[i]);
@@ -63,6 +71,9 @@ esp_err_t WebSocketServer::wsHandler(httpd_req_t *req) {
 }
 
 char WebSocketServer::readCharBlocking() {
+    // The CLI is about to wait for the next keystroke — push out whatever the last
+    // command produced, as a single frame.
+    flushOutput();
     while (buffer.empty()) {
         delay(10);
     }
@@ -72,6 +83,7 @@ char WebSocketServer::readCharBlocking() {
 }
 
 char WebSocketServer::readCharNonBlocking() {
+    flushOutput();
     if (buffer.empty()) return KEY_NONE;
 
     char c = buffer.front();
@@ -80,20 +92,60 @@ char WebSocketServer::readCharNonBlocking() {
     return c;
 }
 
+namespace {
+struct WsAsyncArg {
+    httpd_handle_t hd;
+    int fd;
+    std::string* payload;
+};
+
+// Runs in the httpd task context (via httpd_queue_work). WS frames must be sent
+// from there — calling httpd_ws_send_frame_async directly from another task (the
+// dispatcher) silently drops the output and errors out.
+void wsAsyncSendCb(void* arg) {
+    WsAsyncArg* a = static_cast<WsAsyncArg*>(arg);
+    if (!a) return;
+    httpd_ws_frame_t pkt = {};
+    pkt.final = true;   // complete (non-fragmented) frame, or the client waits forever
+    pkt.type = HTTPD_WS_TYPE_TEXT;
+    pkt.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(a->payload->data()));
+    pkt.len = a->payload->size();
+    httpd_ws_send_frame_async(a->hd, a->fd, &pkt);
+    delete a->payload;
+    delete a;
+}
+}  // namespace
+
 void WebSocketServer::sendText(const std::string& msg) {
     if (clientFd < 0) return;
+    // Accumulate. A single command emits many print()/println() calls; sending each
+    // as its own WebSocket frame (whether directly or queued) is what dropped the
+    // terminal output. Batch them and flush once as the CLI goes idle to read the
+    // next keystroke (see flushOutput + readChar*).
+    outBuffer += msg;
+    if (outBuffer.size() >= 4096) flushOutput();  // bound growth on huge dumps
+}
 
-    // Sanitize UTF8
-    std::string safeMsg = sanitizeUtf8(msg);
+void WebSocketServer::flushOutput() {
+    if (outBuffer.empty()) return;
+    if (clientFd < 0) { outBuffer.clear(); return; }
 
-    httpd_ws_frame_t ws_pkt = {};
-    ws_pkt.type = HTTPD_WS_TYPE_TEXT;
-    ws_pkt.payload = (uint8_t*) safeMsg.c_str();
-    ws_pkt.len = safeMsg.length();
+    std::string safe = sanitizeUtf8(outBuffer);
+    outBuffer.clear();
 
-    esp_err_t err = httpd_ws_send_frame_async(server, clientFd, &ws_pkt);
-    if (err != ESP_OK) {
-        closeClient(server, clientFd);
+    // One frame for the whole batch, sent from the httpd task (httpd_queue_work);
+    // fall back to a direct send if the work queue is unavailable. Never close the
+    // socket on a send hiccup — that made the browser reconnect-loop.
+    WsAsyncArg* a = new WsAsyncArg{ server, clientFd, new std::string(std::move(safe)) };
+    if (httpd_queue_work(server, wsAsyncSendCb, a) != ESP_OK) {
+        httpd_ws_frame_t pkt = {};
+        pkt.final = true;
+        pkt.type = HTTPD_WS_TYPE_TEXT;
+        pkt.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(a->payload->data()));
+        pkt.len = a->payload->size();
+        httpd_ws_send_frame_async(server, clientFd, &pkt);
+        delete a->payload;
+        delete a;
     }
 }
 

@@ -219,6 +219,15 @@ void setup() {
             config.lru_purge_enable = true;
             config.recv_wait_timeout = 11;
             config.send_wait_timeout = 11;
+            // Give the socket table headroom. A phone loading the web CLI opens a burst
+            // of short-lived connections (page, favicon, prefetch, /littlefs + AI fetches)
+            // that, with the default 7 sockets, fill the table and LRU-purge the idle
+            // terminal WebSocket — which the page then reconnects, thrashing into a
+            // "Connection lost" loop. More sockets keep the WS alive through the burst.
+            config.max_open_sockets = 13;
+            // /ws + 8 HttpServer routes already need 9 slots; the default 8 drops the
+            // last handler. Give headroom (and room for /diag under WS_DIAG).
+            config.max_uri_handlers = 16;
 
             // DNS server for captive portal if AP mode
             if (terminalType == TerminalTypeEnum::WiFiAp) {
@@ -227,7 +236,12 @@ void setup() {
             }
 
             if (httpd_start(&server, &config) != ESP_OK) {
-                return;
+                // LWIP may cap max_open_sockets lower than requested; fall back so the
+                // web CLI still starts rather than failing outright.
+                config.max_open_sockets = 7;
+                if (httpd_start(&server, &config) != ESP_OK) {
+                    return;
+                }
             }
 
             JsonTransformer jsonTransformer;
