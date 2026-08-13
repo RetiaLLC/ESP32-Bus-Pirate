@@ -10,9 +10,14 @@
 # Tagging: bitpirate-v<version>-sk.<n> — <version> comes from src/States/GlobalState.h
 # (`version = "x.y"`) and <n> auto-increments per version.
 #
-# NOTE: run this on the branch that carries the newsheen board + env:
-#   gh workflow run bitpirate-release.yml --ref retia-badge-port -f notes="..."
+# NOTE: this workflow lives on the fork's DEFAULT branch (so workflow_dispatch
+# registers), but it CHECKS OUT `retia-badge-port` — the branch that carries the
+# newsheen board + env. Bump BUILD_REF below if the Retia work moves branches.
+#   gh workflow run bitpirate-release.yml -f notes="..."
 name: Bit Pirate Release Build
+
+env:
+  BUILD_REF: retia-badge-port
 
 on:
   workflow_dispatch:
@@ -44,6 +49,8 @@ jobs:
             flash: 16MB
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -95,6 +102,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.BUILD_REF }}
           fetch-depth: 0   # need all tags to pick the next -sk.<n>
 
       - uses: actions/download-artifact@v4
