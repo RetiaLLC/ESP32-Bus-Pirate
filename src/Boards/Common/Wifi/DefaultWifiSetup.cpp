@@ -1,4 +1,4 @@
-#if defined(DEVICE_M5STAMPS3) || defined(DEVICE_S3DEVKIT) || defined(DEVICE_VISION_MASTER_T190) || defined(DEVICE_CUSTOM) || defined(DEVICE_RETIA_BADGE)
+#if defined(DEVICE_M5STAMPS3) || defined(DEVICE_S3DEVKIT) || defined(DEVICE_VISION_MASTER_T190) || defined(DEVICE_CUSTOM) || defined(DEVICE_RETIA_BADGE) || defined(DEVICE_NEWSHEEN)
 
 #include "Boards/Common/Wifi/DefaultWifiSetup.h"
 #include <Preferences.h>

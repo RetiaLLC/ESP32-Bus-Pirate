@@ -18,6 +18,7 @@
 #include <Boards/TEmbed/TEmbedBoard.h>
 #include <Boards/VisionMasterT190/VisionMasterT190Board.h>
 #include <Boards/RetiaBadge/RetiaBadgeBoard.h>
+#include <Boards/Newsheen/NewsheenBoard.h>
 #include <Boards/Custom/CustomBoard.h>
 #include <Boards/Common/Serial/BoardHostSerial.h>
 #include <Providers/DependencyProvider.h>
@@ -142,6 +143,12 @@ void setup() {
         IHostSerial& hostSerial = board.getHostSerial();
     #elif defined(DEVICE_RETIA_BADGE)
         RetiaBadgeBoard board;
+        board.initialize();
+        IDeviceView& deviceView = board.getDeviceView();
+        IInput& deviceInput = board.getDeviceInput();
+        IHostSerial& hostSerial = board.getHostSerial();
+    #elif defined(DEVICE_NEWSHEEN)
+        NewsheenBoard board;
         board.initialize();
         IDeviceView& deviceView = board.getDeviceView();
         IInput& deviceInput = board.getDeviceInput();
