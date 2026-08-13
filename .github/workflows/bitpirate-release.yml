@@ -58,7 +58,8 @@ jobs:
           # the pioarduino platform rejects Python 3.14+; 3.13 is the toolchain
           # this project is verified to build on locally (.venv313).
           python-version: "3.13"
-          cache: "pip"
+          # no cache: "pip" — the repo has no requirements.txt/pyproject.toml to
+          # key on; the PlatformIO cache step below covers the heavy toolchain.
       - name: Install PlatformIO + esptool
         run: pip install platformio esptool
 
