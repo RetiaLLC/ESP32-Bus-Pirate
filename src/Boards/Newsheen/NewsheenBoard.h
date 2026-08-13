@@ -12,8 +12,8 @@
 // The puck is SCREENLESS: its only on-board output is the ring of 8x WS2812B on
 // GPIO16 (behind an SN74LVC1T45 level shifter), so the Bit Pirate UI lives on the
 // USB-CDC / Wi-Fi terminal - there is no on-screen menu. Boot auto-selects USB
-// serial (see TerminalTypeConfigurator); a brief warm-white ring pulse in
-// initialize() is the "I'm alive" indicator on an otherwise dark, screenless board.
+// serial (see TerminalTypeConfigurator). The ring is driven only via the `led`
+// command (LedService owns FastLED on GPIO16); the board does NOT touch it at boot.
 //
 // On-board hardware: Wio-SX1262 LoRa (a REAL SX126x with BUSY+DIO1, so it runs the
 // native LoRaService - unlike the badge's DIO-less RFM95W), an IR receiver on
