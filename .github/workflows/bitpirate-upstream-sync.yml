@@ -86,6 +86,25 @@ jobs:
           fi
           echo "merged ${{ steps.check.outputs.up_tag }} cleanly onto ${BR}"
 
+      - name: Keep Retia CI workflows over upstream's (makes the auto branch pushable)
+        if: steps.check.outputs.new == 'true'
+        run: |
+          set -euo pipefail
+          # The Actions GITHUB_TOKEN is FORBIDDEN from pushing any change under
+          # .github/workflows/ (a hard GitHub rule, not a grantable permission).
+          # Merging upstream pulls in its cd.yml change, which makes `git push` of
+          # the auto branch fail. Revert the workflow dir to our variant's version
+          # so the push is a no-op on workflows — and we want our bitpirate-*
+          # workflows regardless of upstream's CI. (git config persists from the
+          # merge step; we're still on the auto branch.)
+          git checkout "$VARIANT_BRANCH" -- .github/workflows/
+          if ! git diff --cached --quiet; then
+            git commit -q -m "sync: keep Retia CI workflows (GITHUB_TOKEN cannot push upstream workflow changes)"
+            echo "reverted .github/workflows/ to ${VARIANT_BRANCH}"
+          else
+            echo "no upstream workflow changes to revert"
+          fi
+
       - name: Set up Python
         if: steps.check.outputs.new == 'true'
         uses: actions/setup-python@v5
