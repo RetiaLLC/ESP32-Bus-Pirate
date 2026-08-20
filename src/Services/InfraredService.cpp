@@ -15,22 +15,40 @@ IRremoteESP8266
 #include <IRutils.h>
 
 void InfraredService::configure(uint8_t tx, uint8_t rx) {
-    if (tx == _txPin && rx == _rxPin) return; // No change
+    if (tx == _txPin && rx == _rxPin) return;
 
     _txPin = tx;
     _rxPin = rx;
 
-    // TODO: delete ir obj make error message to serial with attached timers, find a workaround,
-    // It should be good for now if the user doesn't call configure with different pins a lot of times
-    // delete _sender;
-    // delete _receiver;
+    if (_receiver) {
+        _receiver->disableIRIn();
+        delete _receiver;
+        _receiver = nullptr;
+    }
+
+    if (_sender) {
+        delete _sender;
+        _sender = nullptr;
+    }
 
     _sender = new IRsend(_txPin);
     _sender->begin();
 
-    _receiver = new IRrecv(_rxPin);
+    _receiver = new IRrecv(_rxPin, kRawBufferSize);
 
     _configured = true;
+}
+
+InfraredService::~InfraredService() {
+    if (_receiver) {
+        _receiver->disableIRIn();
+        delete _receiver;
+        _receiver = nullptr;
+    }
+    if (_sender) {
+        delete _sender;
+        _sender = nullptr;
+    }
 }
 
 void InfraredService::startReceiver() {

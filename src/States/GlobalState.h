@@ -12,7 +12,7 @@
 class GlobalState {
 private:
     // Version
-    static constexpr const char* version = "1.6";
+    static constexpr const char* version = "1.7";
 
     //Pin in use
     std::vector<uint8_t> protectedPins;

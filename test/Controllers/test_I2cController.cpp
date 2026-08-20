@@ -203,6 +203,56 @@ void test_dump_reads_burst_and_formats_hex_and_ascii() {
     TEST_ASSERT_TRUE(fixture.view.contains("AB.."));
 }
 
+void test_dump_completes_register_scan_then_uses_direct_raw_probe() {
+    I2cControllerFixture fixture;
+    fixture.i2cService.requestResults = {0, 0, 0};
+    fixture.input.queueReadChar(KEY_NONE);
+
+    fixture.controller.handleCommand(TerminalCommand("dump", "0x50"));
+
+    // The register scan is not abandoned when the first offset yields nothing.
+    // A device may reject register 0 and still expose valid registers or
+    // commands at other offsets, so every offset is probed before falling back.
+    TEST_ASSERT_EQUAL_UINT32(33, fixture.i2cService.requests.size());
+    TEST_ASSERT_EQUAL_UINT8(16, fixture.i2cService.requests[0].quantity);
+    // The raw fallback then probes a single byte without writing a register
+    // pointer, so devices with a non-register protocol still answer.
+    TEST_ASSERT_EQUAL_UINT8(1, fixture.i2cService.requests.back().quantity);
+    TEST_ASSERT_TRUE(fixture.view.contains("unsupported protocol"));
+}
+
+void test_dump_continues_sequential_raw_reads_after_probe_succeeds() {
+    I2cControllerFixture fixture;
+    fixture.i2cService.endTransmissionResults = {false, true};
+    fixture.i2cService.requestResults = {1, 3};
+    fixture.i2cService.rxData = {0x41, 0x42, 0x43, 0x44};
+    for (int i = 0; i < 2; ++i) fixture.input.queueReadChar(KEY_NONE);
+
+    fixture.controller.handleCommand(TerminalCommand("dump", "0x50", "4"));
+
+    TEST_ASSERT_EQUAL_UINT32(2, fixture.i2cService.requests.size());
+    TEST_ASSERT_EQUAL_UINT8(1, fixture.i2cService.requests[0].quantity);
+    TEST_ASSERT_EQUAL_UINT8(3, fixture.i2cService.requests[1].quantity);
+    TEST_ASSERT_EQUAL_UINT32(1, fixture.i2cService.writtenBytes.size());
+    TEST_ASSERT_TRUE(fixture.view.contains("00: 41 42 43 44"));
+    TEST_ASSERT_TRUE(fixture.view.contains("ABCD"));
+}
+
+void test_dump_can_cancel_after_successful_raw_probe() {
+    I2cControllerFixture fixture;
+    fixture.i2cService.endTransmissionResults = {false, true};
+    fixture.i2cService.requestResults = {1};
+    fixture.i2cService.rxData = {0x41};
+    fixture.input.queueReadChar(KEY_NONE);
+    fixture.input.queueReadChar('\n');
+
+    fixture.controller.handleCommand(TerminalCommand("dump", "0x50", "4"));
+
+    TEST_ASSERT_EQUAL_UINT32(1, fixture.i2cService.requests.size());
+    TEST_ASSERT_TRUE(fixture.view.contains("Cancelled by user"));
+    TEST_ASSERT_TRUE(fixture.view.contains("00: 41 ?? ?? ??"));
+}
+
 void test_config_updates_state_and_configures_service() {
     I2cControllerFixture fixture;
     fixture.input.queueLine("4");
@@ -447,6 +497,9 @@ void runI2cControllerTests() {
     RUN_TEST(test_read_uses_repeated_start_and_displays_register_value);
     RUN_TEST(test_read_stops_when_device_does_not_ack);
     RUN_TEST(test_dump_reads_burst_and_formats_hex_and_ascii);
+    RUN_TEST(test_dump_completes_register_scan_then_uses_direct_raw_probe);
+    RUN_TEST(test_dump_continues_sequential_raw_reads_after_probe_succeeds);
+    RUN_TEST(test_dump_can_cancel_after_successful_raw_probe);
     RUN_TEST(test_config_updates_state_and_configures_service);
     RUN_TEST(test_ensure_configured_prompts_once_then_reapplies_saved_state);
     RUN_TEST(test_swap_updates_state_and_reconfigures_bus);
