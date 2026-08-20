@@ -85,10 +85,19 @@ jobs:
             0x8000 .pio/build/${{ matrix.env }}/partitions.bin \
             0xE000 "$BOOT_APP0" \
             0x10000 .pio/build/${{ matrix.env }}/firmware.bin
-          # assert the image header really is DIO (byte 2 == 02)
+          # Guard BOTH header bytes so a flash-size-header mismatch can never ship.
+          # (An 8MB header on a 16MB partition table boot-loops when flashed verbatim
+          # by esptool-js/scriptkitty — the v1.6-sk.1 incident. esptool --flash-size
+          # detect hides it by patching on write; verbatim flashers don't.)
+          #   byte2 == 02 (DIO)   byte3 high-nibble encodes flash size (2=4MB 3=8MB 4=16MB 5=32MB)
           HDR=$(xxd -p -l 4 bitpirate-${{ matrix.device }}.factory.bin)
           echo "header: $HDR"
           [ "${HDR:4:2}" = "02" ] || { echo "::error::flash-mode byte is not DIO"; exit 1; }
+          case "${{ matrix.flash }}" in
+            4MB) WANT=2;; 8MB) WANT=3;; 16MB) WANT=4;; 32MB) WANT=5;; *) WANT="";; esac
+          if [ -n "$WANT" ] && [ "${HDR:6:1}" != "$WANT" ]; then
+            echo "::error::flash-size header nibble ${HDR:6:1} != $WANT expected for ${{ matrix.flash }} — would boot-loop when flashed verbatim"; exit 1
+          fi
           sha256sum bitpirate-${{ matrix.device }}.factory.bin
 
       - uses: actions/upload-artifact@v4
