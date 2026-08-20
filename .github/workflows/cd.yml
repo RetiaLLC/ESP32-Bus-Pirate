@@ -46,20 +46,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-platformio-
 
-      - name: Install build tools
-        shell: bash
+      - name: Install PlatformIO
         run: |
-          set -euo pipefail
-
-          python -m pip install --upgrade pip setuptools
+          python -m pip install --upgrade pip
           python -m pip install --upgrade platformio
-
-          # Standalone esptool used only to generate merged images.
-          # Keep it independent from PlatformIO's internal tool-esptoolpy package.
-          python -m pip install "esptool==5.3.1"
-
           pio --version
-          esptool version
 
       - name: Build merged firmware images
         shell: bash
@@ -75,19 +66,6 @@ jobs:
 
           rm -rf "${OUTPUT_DIR}"
           mkdir -p "${DOWNLOAD_DIR}"
-
-          # Enable the full FastLED protocol set for upstream distributed builds.
-          sed -i -E \
-            's/^([[:space:]]*);[[:space:]]*(-D ENABLE_FASTLED_PROTOCOL_SWITCHES.*)$/\1\2/' \
-            platformio.ini
-
-          # Fail explicitly if the build flag could not be enabled.
-          if ! grep -q '^[[:space:]]*-D ENABLE_FASTLED_PROTOCOL_SWITCHES' platformio.ini; then
-            echo "Failed to enable ENABLE_FASTLED_PROTOCOL_SWITCHES."
-            exit 1
-          fi
-
-          echo "FastLED protocol switches enabled for upstream builds."
 
           # Find every [env:...] section except native-tests.
           mapfile -t ENVIRONMENTS < <(
@@ -149,37 +127,20 @@ jobs:
             pio run -e "${ENVIRONMENT}"
 
             BUILD_DIR=".pio/build/${ENVIRONMENT}"
-
-            BOOTLOADER_IMAGE="${BUILD_DIR}/bootloader.bin"
-            PARTITIONS_IMAGE="${BUILD_DIR}/partitions.bin"
-            FIRMWARE_IMAGE="${BUILD_DIR}/firmware.bin"
-
+            FACTORY_IMAGE="${BUILD_DIR}/firmware.factory.bin"
             FIRMWARE_NAME="esp32-bit-pirate-${ENVIRONMENT}-upstream.bin"
             DESTINATION="${DOWNLOAD_DIR}/${FIRMWARE_NAME}"
 
-            for FILE in \
-              "${BOOTLOADER_IMAGE}" \
-              "${PARTITIONS_IMAGE}" \
-              "${FIRMWARE_IMAGE}"
-            do
-              if [[ ! -s "${FILE}" ]]; then
-                echo "Required firmware component is missing or empty: ${FILE}"
-                exit 1
-              fi
-            done
+            if [[ ! -f "${FACTORY_IMAGE}" ]]; then
+              echo "Merged firmware was not generated for ${ENVIRONMENT}."
+              echo "Expected file: ${FACTORY_IMAGE}"
+              exit 1
+            fi
 
-            echo "Merging firmware for ${ENVIRONMENT}..."
-
-            esptool \
-              --chip esp32s3 \
-              merge-bin \
-              -o "${DESTINATION}" \
-              0x0 "${BOOTLOADER_IMAGE}" \
-              0x8000 "${PARTITIONS_IMAGE}" \
-              0x10000 "${FIRMWARE_IMAGE}"
+            cp "${FACTORY_IMAGE}" "${DESTINATION}"
 
             if [[ ! -s "${DESTINATION}" ]]; then
-              echo "Merged firmware was not generated for ${ENVIRONMENT}."
+              echo "Generated firmware is empty for ${ENVIRONMENT}."
               exit 1
             fi
 
