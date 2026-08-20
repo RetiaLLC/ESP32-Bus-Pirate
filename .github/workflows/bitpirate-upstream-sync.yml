@@ -1,0 +1,169 @@
+# ESP32 Bit Pirate — upstream auto-sync.
+#
+# Watches geo-tp/ESP32-Bit-Pirate (the canonical upstream — now pioarduino-based,
+# same platform as us) for NEW releases. When upstream publishes a version we have
+# not built yet, this:
+#   1. merges the upstream release tag onto our Newsheen variant (retia-badge-port)
+#      -> a throwaway `auto/upstream-<tag>` branch (retia-badge-port is NEVER touched),
+#   2. rebuilds env=newsheen and merges a DIO 16MB factory image,
+#   3. publishes an UNTESTED prerelease -> scriptkitty shows it under "untested
+#      auto-builds", the verified default is unchanged.
+# A human then flashes a puck, verifies, and runs "Bit Pirate Promote" to make it
+# the verified default (the manual gate).
+#
+# SAFETY (why this can't quietly ship a broken build):
+#   - merge conflict  -> `git merge --abort`, job FAILS, nothing published.
+#   - build failure   -> job FAILS, nothing published.
+#   - header wrong    -> asserts DIO + 16MB, job FAILS, nothing published.
+#   - only ever creates PRERELEASES; never promotes / never marks verified.
+#   - never pushes to retia-badge-port; the human adopts upstream by merging
+#     auto/upstream-<tag> in themselves after the build verifies.
+name: Bit Pirate Upstream Sync
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"        # Mondays 06:17 UTC (upstream releases ~monthly)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebuild even if this upstream version was already built"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bitpirate-upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: geo-tp/ESP32-Bit-Pirate
+  VARIANT_BRANCH: retia-badge-port
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VARIANT_BRANCH }}
+          fetch-depth: 0          # full history + tags (needed for merge + sk.<n>)
+
+      - name: Check upstream for a new release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          UP_TAG=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName)
+          test -n "$UP_TAG" || { echo "::error::could not read latest upstream release"; exit 1; }
+          VER="${UP_TAG#v}"                       # v1.7 -> 1.7
+          echo "upstream latest: $UP_TAG (version $VER)"
+          if git tag -l "bitpirate-v${VER}-sk.*" | grep -q . && [ "${{ inputs.force }}" != "true" ]; then
+            echo "::notice::already built bitpirate-v${VER}-sk.* — nothing to do"
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "up_tag=$UP_TAG" >> "$GITHUB_OUTPUT"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Merge upstream onto the variant (fails safe on conflict)
+        if: steps.check.outputs.new == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name  "retia-ci"
+          git config user.email "ci@retia.io"
+          git remote add geotp "https://github.com/${UPSTREAM}.git" 2>/dev/null || true
+          git fetch --no-tags geotp tag "${{ steps.check.outputs.up_tag }}"
+          BR="auto/upstream-${{ steps.check.outputs.up_tag }}"
+          git checkout -B "$BR" "$VARIANT_BRANCH"
+          if ! git merge --no-edit "${{ steps.check.outputs.up_tag }}"; then
+            git merge --abort || true
+            echo "::error::merge of ${{ steps.check.outputs.up_tag }} onto ${VARIANT_BRANCH} has CONFLICTS. Resolve manually (merge upstream into ${VARIANT_BRANCH}), then re-run. NOT publishing."
+            exit 1
+          fi
+          echo "merged ${{ steps.check.outputs.up_tag }} cleanly onto ${BR}"
+
+      - name: Set up Python
+        if: steps.check.outputs.new == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"     # pioarduino rejects 3.14+; verified on 3.13
+      - name: Install PlatformIO + esptool
+        if: steps.check.outputs.new == 'true'
+        run: pip install platformio esptool
+
+      - name: Cache PlatformIO
+        if: steps.check.outputs.new == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.buildcache
+          key: pio-${{ runner.os }}-newsheen-${{ hashFiles('platformio.ini') }}
+
+      - name: Build + merge DIO 16MB factory (fails safe on build error)
+        if: steps.check.outputs.new == 'true'
+        run: |
+          set -euo pipefail
+          pio run -e newsheen
+          BOOT_APP0=$(find ~/.platformio/packages -path '*framework-arduinoespressif32*/tools/partitions/boot_app0.bin' | head -1)
+          test -n "$BOOT_APP0" || { echo "::error::boot_app0.bin not found"; exit 1; }
+          esptool --chip esp32s3 merge-bin -o bitpirate-newsheen.factory.bin \
+            --flash-mode dio --flash-freq 80m --flash-size 16MB \
+            0x0 .pio/build/newsheen/bootloader.bin \
+            0x8000 .pio/build/newsheen/partitions.bin \
+            0xE000 "$BOOT_APP0" \
+            0x10000 .pio/build/newsheen/firmware.bin
+          HDR=$(xxd -p -l 4 bitpirate-newsheen.factory.bin); echo "header: $HDR"
+          # byte2 == 02 (DIO) and byte3 high-nibble == 4 (16MB) — the flash-size trap guard
+          [ "${HDR:4:2}" = "02" ] || { echo "::error::flash-mode byte is not DIO"; exit 1; }
+          [ "${HDR:6:1}" = "4" ]  || { echo "::error::flash-size nibble is not 16MB (0x4X) — would boot-loop when flashed verbatim"; exit 1; }
+
+      - name: Push auto branch + publish UNTESTED prerelease
+        if: steps.check.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BR="auto/upstream-${{ steps.check.outputs.up_tag }}"
+          git push -f origin "$BR"
+          VER="${{ steps.check.outputs.ver }}"
+          N=1
+          while git rev-parse -q --verify "refs/tags/bitpirate-v${VER}-sk.${N}" >/dev/null; do N=$((N+1)); done
+          TAG="bitpirate-v${VER}-sk.${N}"
+          {
+            echo "**Automatic upstream sync — UNTESTED.** CI merged geo-tp upstream"
+            echo "\`${{ steps.check.outputs.up_tag }}\` onto our Newsheen variant"
+            echo "(\`${VARIANT_BRANCH}\`) on branch \`${BR}\` and built env=newsheen."
+            echo
+            echo "Nobody has flashed this yet. It appears on [scriptkitty.sh](https://scriptkitty.sh)"
+            echo "under \"untested auto-builds\"; the verified default is unchanged. Flash a"
+            echo "Newsheen puck, verify, then run **Bit Pirate Promote** with this tag."
+            echo
+            echo "| asset | sha256 |"
+            echo "|---|---|"
+            echo "| bitpirate-newsheen.factory.bin | $(sha256sum bitpirate-newsheen.factory.bin | cut -d' ' -f1) |"
+          } > notes.md
+          gh release create "$TAG" --prerelease --target "$BR" \
+            --title "Bit Pirate ${VER} upstream auto-sync sk.${N}" \
+            --notes-file notes.md \
+            bitpirate-newsheen.factory.bin
+          echo "published $TAG (UNTESTED)"
+
+      - name: Ping scriptkitty.sh flasher
+        if: steps.check.outputs.new == 'true'
+        env:
+          SK_TOKEN: ${{ secrets.SCRIPTKITTY_DISPATCH_TOKEN }}
+        run: |
+          if [ -n "$SK_TOKEN" ]; then
+            curl -sf -X POST -H "Authorization: Bearer $SK_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/RetiaLLC/scriptkitty.sh/dispatches \
+              -d '{"event_type":"channel-release"}' && echo "flasher rebuild triggered" \
+              || echo "::warning::dispatch to scriptkitty.sh failed — site picks it up on its weekly cron"
+          else
+            echo "::notice::SCRIPTKITTY_DISPATCH_TOKEN not set — site picks it up on its weekly cron"
+          fi
